@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from typing import Any
 
-from bot.agents.prompts import AGENTS
 from bot.services.ai_service import AIService
 from bot.utils.logger import get_logger
 
@@ -11,17 +9,30 @@ logger = get_logger(__name__)
 
 ProgressCallback = Callable[[str, int, int], Awaitable[None]]
 
+# Single focused design pass — fast enough for interactive use
+_SYSTEM = (
+    "أنت مهندس بوتات تيليجرام خبير (aiogram 3 / Python). "
+    "من وصف المستخدم، أنشئ وثيقة تصميم جاهزة للتنفيذ بالعربية تشمل:\n"
+    "1) ملخص الفكرة والجمهور\n"
+    "2) الأوامر والأزرار\n"
+    "3) هيكل الملفات المقترح\n"
+    "4) نموذج البيانات إن لزم\n"
+    "5) صلاحيات المشرف والأمان\n"
+    "6) متغيرات .env\n"
+    "7) خطوات التشغيل السريعة\n"
+    "كن واضحاً ومختصراً بدون حشو."
+)
+
 
 class AgentPipeline:
-    """Runs the 11-agent pipeline to design a Telegram bot from a description."""
+    """Fast single-pass bot designer (replaces the slow 11-agent chain)."""
 
     def __init__(self, ai: AIService | None = None) -> None:
         self._ai = ai or AIService()
-        self._agents = AGENTS
 
     @property
     def agent_count(self) -> int:
-        return len(self._agents)
+        return 1
 
     async def run(
         self,
@@ -29,40 +40,27 @@ class AgentPipeline:
         *,
         on_progress: ProgressCallback | None = None,
     ) -> str:
-        context_parts: list[str] = [f"طلب المستخدم:\n{user_description.strip()}"]
+        if on_progress:
+            await on_progress("تصميم البوت", 1, 1)
 
-        for index, agent in enumerate(self._agents, start=1):
-            name = agent["name"]
-            if on_progress:
-                await on_progress(name, index, self.agent_count)
-
-            prior = "\n\n---\n\n".join(context_parts[-4:])  # keep last chunks for context size
-            user_msg = (
-                f"المرحلة {index}/{self.agent_count} — {name}\n\n"
-                f"السياق السابق:\n{prior}\n\n"
-                f"نفّذ مهمتك الآن بوضوح."
+        desc = user_description.strip()
+        try:
+            result = await self._ai.chat(
+                [
+                    {"role": "system", "content": _SYSTEM},
+                    {
+                        "role": "user",
+                        "content": f"وصف المستخدم:\n{desc}\n\nصمّم البوت الآن.",
+                    },
+                ],
+                temperature=0.45,
             )
-            try:
-                result = await self._ai.chat(
-                    [
-                        {"role": "system", "content": agent["system"]},
-                        {"role": "user", "content": user_msg},
-                    ],
-                    temperature=0.5,
-                )
-            except Exception as exc:
-                logger.exception("Agent %s failed: %s", agent["id"], type(exc).__name__)
-                result = f"[تعذّر إكمال وكيل {name}: {type(exc).__name__}]"
+        except Exception as exc:
+            logger.exception("Design pass failed: %s", type(exc).__name__)
+            result = f"[تعذّر التصميم: {type(exc).__name__}]"
 
-            context_parts.append(f"### {name}\n{result}")
-            logger.info("Agent finished %s (%s/%s)", name, index, self.agent_count)
-
-        # Final document is the orchestrator output (last), with a short header
-        final = context_parts[-1]
         header = (
-            "🚀 <b>نتيجة 11 وكيل — تصميم البوت</b>\n"
-            f"<i>الوصف:</i> {user_description[:200]}{'…' if len(user_description) > 200 else ''}\n\n"
+            "🚀 <b>تصميم البوت</b>\n"
+            f"<i>{desc[:180]}{'…' if len(desc) > 180 else ''}</i>\n\n"
         )
-        # strip markdown header from orchestrator if present for cleaner send
-        body = final.replace("### Orchestrator\n", "").replace("### Orchestrator", "")
-        return header + body
+        return header + (result or "").strip()

@@ -71,14 +71,14 @@ async def process_bot_description(message: Message, state: FSMContext) -> None:
 
     await state.clear()
     status = await message.answer(
-        "⏳ جاري تشغيل <b>11 وكيل</b> لتصميم البوت...\nقد يستغرق دقيقة أو أكثر.",
+        "⏳ جاري تصميم البوت بالذكاء الاصطناعي...",
         parse_mode="HTML",
     )
 
     async def on_progress(name: str, index: int, total: int) -> None:
         try:
             await status.edit_text(
-                f"⏳ الوكيل {index}/{total}: <b>{name}</b>...",
+                f"⏳ {name}...",
                 parse_mode="HTML",
             )
         except Exception:
