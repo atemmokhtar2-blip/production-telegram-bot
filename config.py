@@ -42,6 +42,18 @@ class Settings(BaseSettings):
             return "INFO"
         return upper
 
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def normalize_database_url(cls, value: str) -> str:
+        if not value:
+            return "sqlite+aiosqlite:///./data/bot.db"
+        # Railway/Heroku style postgres:// → SQLAlchemy async
+        if value.startswith("postgres://"):
+            value = value.replace("postgres://", "postgresql+asyncpg://", 1)
+        elif value.startswith("postgresql://") and "+asyncpg" not in value:
+            value = value.replace("postgresql://", "postgresql+asyncpg://", 1)
+        return value
+
     @property
     def is_sqlite(self) -> bool:
         return self.database_url.startswith("sqlite")

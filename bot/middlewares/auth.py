@@ -36,7 +36,7 @@ class AuthMiddleware(BaseMiddleware):
                     logger.warning(
                         "Blocked user attempted access telegram_id=%s", user.id
                     )
-                    await event.answer("🚫 You are blocked from using this bot.")
+                    await event.answer("🚫 تم حظرك من استخدام هذا البوت.")
                     return None
         except Exception as exc:
             logger.exception(
@@ -44,9 +44,7 @@ class AuthMiddleware(BaseMiddleware):
                 user.id,
                 type(exc).__name__,
             )
-            await event.answer(
-                "⚠️ Temporary service error. Please try again in a moment."
-            )
+            await event.answer("⚠️ خطأ مؤقت في الخدمة. حاول بعد لحظات.")
             return None
 
         return await handler(event, data)

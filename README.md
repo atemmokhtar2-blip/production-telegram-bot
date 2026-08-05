@@ -218,3 +218,40 @@ pip install -r requirements.txt
 ## License
 
 MIT License — see [LICENSE](LICENSE).
+
+
+---
+
+## Deploy on Railway
+
+1. Push this repo to GitHub (already done if using the project remote).
+2. Go to [railway.app](https://railway.app) → **New Project** → **Deploy from GitHub repo**.
+3. Select this repository.
+4. Add variables in Railway **Variables**:
+
+| Variable | Value |
+|----------|--------|
+| `BOT_TOKEN` | Your token from @BotFather |
+| `ADMIN_IDS` | Your Telegram user id (optional) |
+| `LOG_LEVEL` | `INFO` |
+| `AI_MODEL` | `gpt-4o-mini` (optional) |
+
+5. (Optional) Add a **PostgreSQL** plugin. Railway will inject `DATABASE_URL` — the bot auto-converts it to `postgresql+asyncpg://`.
+6. Deploy. The start command is `python main.py` (polling worker).
+
+### Local check before deploy
+
+```bash
+cp .env.example .env
+# edit BOT_TOKEN
+pip install -r requirements.txt
+python main.py
+```
+
+### Create a bot from a description
+
+In Telegram:
+
+1. `/create` or button **🤖 إنشاء بوت**
+2. Send a detailed Arabic/English description
+3. The **11-agent pipeline** designs the bot (Master → Architect → Backend → Review → Security → QA → Debug → Perf → Docs → Release → Orchestrator)

@@ -51,7 +51,7 @@ async def main() -> None:
 
     try:
         logger.info("Bot is running. Press Ctrl+C to stop.")
-        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types(), drop_pending_updates=True)
     finally:
         await bot.session.close()
         logger.info("Bot stopped")

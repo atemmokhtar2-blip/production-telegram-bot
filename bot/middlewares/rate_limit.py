@@ -83,7 +83,7 @@ class RateLimitMiddleware(BaseMiddleware):
             if now < blocked_until:
                 remaining = int(blocked_until - now)
                 await event.answer(
-                    f"⏳ Too many requests. Please wait {remaining}s before trying again."
+                    f"⏳ طلبات كثيرة جداً. انتظر {remaining} ثانية ثم حاول مجدداً."
                 )
                 return None
             self._blocked_until.pop(user_id, None)
@@ -100,7 +100,7 @@ class RateLimitMiddleware(BaseMiddleware):
                 self.block_seconds,
             )
             await event.answer(
-                f"⏳ Too many requests. You are temporarily limited for {self.block_seconds}s."
+                f"⏳ طلبات كثيرة جداً. تم تقييدك مؤقتاً لمدة {self.block_seconds} ثانية."
             )
             return None
 
