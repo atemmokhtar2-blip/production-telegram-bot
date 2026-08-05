@@ -116,3 +116,24 @@ Reply keyboard buttons work the same way.
 
 MIT
 ```
+
+## Docker
+
+```bash
+# Copy environment file and edit it
+cp .env.example .env
+# Edit .env with your real BOT_TOKEN and ADMIN_IDS
+
+# Build and run
+docker compose up -d --build
+
+# View logs
+docker compose logs -f bot
+
+# Stop
+docker compose down
+```
+
+## Architecture
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the full software architecture document.
