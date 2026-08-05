@@ -1,4 +1,4 @@
-# Environment
+# Environment & secrets
 .env
 *.env
 !.env.example
@@ -34,6 +34,8 @@ htmlcov/
 .ruff_cache/
 .dmypy.json
 dmypy.json
+.pytype/
+.pyre/
 
 # Virtual environments
 .venv/
@@ -41,23 +43,30 @@ venv/
 ENV/
 env/
 
-# IDE
+# IDE / editors
 .idea/
 .vscode/
 *.swp
 *.swo
 *~
+.project
+.settings/
 
-# Logs and data
+# Runtime data & logs
 logs/*.log
+logs/*.log.*
 data/
 *.db
 *.sqlite
 *.sqlite3
+*.db-wal
+*.db-shm
 
 # OS
 .DS_Store
 Thumbs.db
+Desktop.ini
 
-# Docker
-.dockerignore
+# Docker (keep Dockerfile & compose tracked)
+# local override files
+docker-compose.override.yml

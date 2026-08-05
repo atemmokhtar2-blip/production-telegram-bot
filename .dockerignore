@@ -10,10 +10,13 @@ __pycache__
 *.db
 *.sqlite
 *.sqlite3
+*.db-wal
+*.db-shm
 logs/*.log
 data/
 .idea
 .vscode
+ARCHITECTURE.md
+.DS_Store
 *.md
 !README.md
-.DS_Store
