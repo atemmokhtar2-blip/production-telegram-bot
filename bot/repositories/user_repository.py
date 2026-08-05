@@ -10,6 +10,19 @@ from bot.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+# Defense-in-depth length caps matching the DB column sizes
+MAX_USERNAME_LEN = 255
+MAX_FULL_NAME_LEN = 255
+
+
+def _sanitize_str(value: str | None, max_len: int) -> str | None:
+    if value is None:
+        return None
+    cleaned = value.strip()
+    if not cleaned:
+        return None
+    return cleaned[:max_len]
+
 
 class UserRepository:
     def __init__(self, session: AsyncSession) -> None:
@@ -35,8 +48,8 @@ class UserRepository:
         try:
             user = User(
                 telegram_id=telegram_id,
-                username=username,
-                full_name=full_name,
+                username=_sanitize_str(username, MAX_USERNAME_LEN),
+                full_name=_sanitize_str(full_name, MAX_FULL_NAME_LEN),
                 is_admin=is_admin,
             )
             self._session.add(user)
@@ -61,9 +74,9 @@ class UserRepository:
         try:
             values: dict = {}
             if username is not None:
-                values["username"] = username
+                values["username"] = _sanitize_str(username, MAX_USERNAME_LEN)
             if full_name is not None:
-                values["full_name"] = full_name
+                values["full_name"] = _sanitize_str(full_name, MAX_FULL_NAME_LEN)
             if is_admin is not None:
                 values["is_admin"] = is_admin
             if is_blocked is not None:
@@ -84,8 +97,14 @@ class UserRepository:
 
     async def get_all(self, limit: int = 100, offset: int = 0) -> Sequence[User]:
         try:
+            # Cap limit to prevent accidental large fetches
+            safe_limit = max(1, min(limit, 200))
+            safe_offset = max(0, offset)
             result = await self._session.execute(
-                select(User).order_by(User.created_at.desc()).limit(limit).offset(offset)
+                select(User)
+                .order_by(User.created_at.desc())
+                .limit(safe_limit)
+                .offset(safe_offset)
             )
             return result.scalars().all()
         except Exception as exc:

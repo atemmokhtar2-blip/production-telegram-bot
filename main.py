@@ -10,7 +10,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 
 from bot.database.base import init_db
 from bot.handlers import get_handlers_router
-from bot.middlewares import AuthMiddleware, LoggingMiddleware
+from bot.middlewares import AuthMiddleware, LoggingMiddleware, RateLimitMiddleware
 from bot.utils.logger import get_logger, setup_logging
 from config import get_settings
 
@@ -25,6 +25,11 @@ async def main() -> None:
         logger.error("BOT_TOKEN is not set or is still the example value. Please configure .env")
         sys.exit(1)
 
+    # Basic token format sanity check (Telegram bot tokens look like <digits>:<alphanum>)
+    if ":" not in settings.bot_token or len(settings.bot_token) < 30:
+        logger.error("BOT_TOKEN appears malformed. Please use a valid token from @BotFather")
+        sys.exit(1)
+
     logger.info("Starting bot...")
 
     await init_db()
@@ -37,6 +42,8 @@ async def main() -> None:
     storage = MemoryStorage()
     dp = Dispatcher(storage=storage)
 
+    # Order matters: rate-limit first → logging → auth
+    dp.message.middleware(RateLimitMiddleware())
     dp.update.middleware(LoggingMiddleware())
     dp.message.middleware(AuthMiddleware())
 

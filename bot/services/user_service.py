@@ -30,7 +30,7 @@ class UserService:
                     full_name=tg_user.full_name,
                 )
                 logger.debug("Updated user profile telegram_id=%s", tg_user.id)
-            return user
+            return user  # type: ignore[return-value]
 
         is_admin = tg_user.id in self._settings.admin_ids
         user = await self._repo.create(
@@ -43,20 +43,24 @@ class UserService:
         return user
 
     async def is_admin(self, telegram_id: int) -> bool:
+        if telegram_id in self._settings.admin_ids:
+            return True
         user = await self._repo.get_by_telegram_id(telegram_id)
         if user is None:
-            return telegram_id in self._settings.admin_ids
-        return user.is_admin or telegram_id in self._settings.admin_ids
+            return False
+        return bool(user.is_admin)
 
     async def is_blocked(self, telegram_id: int) -> bool:
         user = await self._repo.get_by_telegram_id(telegram_id)
         if user is None:
             return False
-        return user.is_blocked
+        return bool(user.is_blocked)
 
     async def get_stats(self) -> dict:
         total = await self._repo.count()
         return {"total_users": total}
 
     async def list_users(self, limit: int = 50) -> list[User]:
-        return list(await self._repo.get_all(limit=limit))
+        # Hard cap to prevent large data exposure even for admins
+        safe_limit = max(1, min(limit, 50))
+        return list(await self._repo.get_all(limit=safe_limit))

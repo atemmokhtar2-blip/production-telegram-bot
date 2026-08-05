@@ -11,6 +11,9 @@ from bot.utils.logger import get_logger
 logger = get_logger(__name__)
 router = Router(name="echo")
 
+# Hard limit to prevent abuse / oversized replies (Telegram max is ~4096)
+MAX_ECHO_LENGTH = 1000
+
 
 @router.message(Command("profile"))
 @router.message(F.text == "👤 Profile")
@@ -34,7 +37,17 @@ async def echo_handler(message: Message) -> None:
     try:
         if not message.text:
             return
-        text = MESSAGES["echo"].format(text=message.text)
+
+        # Reject empty / whitespace-only
+        cleaned = message.text.strip()
+        if not cleaned:
+            return
+
+        # Truncate overly long input to prevent abuse
+        if len(cleaned) > MAX_ECHO_LENGTH:
+            cleaned = cleaned[:MAX_ECHO_LENGTH] + "…"
+
+        text = MESSAGES["echo"].format(text=cleaned)
         await message.answer(text)
     except Exception as exc:
         logger.exception("Error in echo handler: %s", exc)

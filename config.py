@@ -29,8 +29,17 @@ class Settings(BaseSettings):
         if value is None or value == "":
             return []
         if isinstance(value, list):
-            return [int(v) for v in value]
+            return [int(v) for v in value if str(v).strip()]
         return [int(item.strip()) for item in str(value).split(",") if item.strip()]
+
+    @field_validator("log_level")
+    @classmethod
+    def validate_log_level(cls, value: str) -> str:
+        allowed = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+        upper = value.upper()
+        if upper not in allowed:
+            return "INFO"
+        return upper
 
     @property
     def is_sqlite(self) -> bool:

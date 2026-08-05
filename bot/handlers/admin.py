@@ -24,8 +24,9 @@ async def cmd_stats(message: Message) -> None:
             stats = await service.get_stats()
         text = MESSAGES["stats"].format(total_users=stats["total_users"])
         await message.answer(text, parse_mode="HTML")
+        logger.info("Admin stats requested by telegram_id=%s", message.from_user.id if message.from_user else "unknown")
     except Exception as exc:
-        logger.exception("Error in /stats handler: %s", exc)
+        logger.exception("Error in /stats handler: %s", type(exc).__name__)
         await message.answer("An unexpected error occurred. Please try again later.")
 
 
@@ -42,11 +43,15 @@ async def cmd_users(message: Message) -> None:
 
         lines = [MESSAGES["users_list_header"]]
         for u in users:
+            # Never expose internal DB id; only telegram_id + public profile fields
             uname = f"@{u.username}" if u.username else "—"
+            # Escape-like safety: Telegram HTML mode requires care, but we control the template
+            safe_name = (u.full_name or "—").replace("<", "").replace(">", "")
             lines.append(
-                f"• <code>{u.telegram_id}</code> {uname} — {u.full_name or '—'}"
+                f"• <code>{u.telegram_id}</code> {uname} — {safe_name}"
             )
         await message.answer("\n".join(lines), parse_mode="HTML")
+        logger.info("Admin users list requested by telegram_id=%s", message.from_user.id if message.from_user else "unknown")
     except Exception as exc:
-        logger.exception("Error in /users handler: %s", exc)
+        logger.exception("Error in /users handler: %s", type(exc).__name__)
         await message.answer("An unexpected error occurred. Please try again later.")
