@@ -10,7 +10,6 @@ from bot.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-# Defense-in-depth length caps matching the DB column sizes
 MAX_USERNAME_LEN = 255
 MAX_FULL_NAME_LEN = 255
 
@@ -85,11 +84,16 @@ class UserRepository:
             if not values:
                 return await self.get_by_telegram_id(telegram_id)
 
-            await self._session.execute(
-                update(User).where(User.telegram_id == telegram_id).values(**values)
+            # Single round-trip: UPDATE … RETURNING *
+            stmt = (
+                update(User)
+                .where(User.telegram_id == telegram_id)
+                .values(**values)
+                .returning(User)
             )
+            result = await self._session.execute(stmt)
             await self._session.commit()
-            return await self.get_by_telegram_id(telegram_id)
+            return result.scalar_one_or_none()
         except Exception as exc:
             await self._session.rollback()
             logger.error("Failed to update user telegram_id=%s: %s", telegram_id, exc)
@@ -97,7 +101,6 @@ class UserRepository:
 
     async def get_all(self, limit: int = 100, offset: int = 0) -> Sequence[User]:
         try:
-            # Cap limit to prevent accidental large fetches
             safe_limit = max(1, min(limit, 200))
             safe_offset = max(0, offset)
             result = await self._session.execute(

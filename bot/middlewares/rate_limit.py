@@ -11,12 +11,11 @@ from bot.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-# Max messages allowed in the sliding window
 MAX_MESSAGES = 20
-# Window size in seconds
 WINDOW_SECONDS = 60
-# Hard block duration after exceeding limit (seconds)
 BLOCK_SECONDS = 120
+# Bound memory: max tracked users before global prune
+MAX_TRACKED_USERS = 10_000
 
 
 class RateLimitMiddleware(BaseMiddleware):
@@ -35,10 +34,9 @@ class RateLimitMiddleware(BaseMiddleware):
         self.max_messages = max_messages
         self.window_seconds = window_seconds
         self.block_seconds = block_seconds
-        # user_id -> deque of timestamps
         self._hits: dict[int, deque[float]] = defaultdict(deque)
-        # user_id -> unblock timestamp
         self._blocked_until: dict[int, float] = {}
+        self._last_global_cleanup = time.monotonic()
 
     def _cleanup(self, user_id: int, now: float) -> None:
         hits = self._hits[user_id]
@@ -47,6 +45,22 @@ class RateLimitMiddleware(BaseMiddleware):
             hits.popleft()
         if not hits:
             self._hits.pop(user_id, None)
+
+    def _maybe_global_cleanup(self, now: float) -> None:
+        # Prune stale entries occasionally to bound memory under high churn
+        if now - self._last_global_cleanup < 60:
+            return
+        if len(self._hits) < MAX_TRACKED_USERS and len(self._blocked_until) < MAX_TRACKED_USERS:
+            self._last_global_cleanup = now
+            return
+        cutoff = now - self.window_seconds
+        stale = [uid for uid, hits in self._hits.items() if not hits or hits[-1] < cutoff]
+        for uid in stale:
+            self._hits.pop(uid, None)
+        expired_blocks = [uid for uid, until in self._blocked_until.items() if until < now]
+        for uid in expired_blocks:
+            self._blocked_until.pop(uid, None)
+        self._last_global_cleanup = now
 
     async def __call__(
         self,
@@ -64,7 +78,6 @@ class RateLimitMiddleware(BaseMiddleware):
         user_id = user.id
         now = time.monotonic()
 
-        # Permanent-style temporary block after abuse
         blocked_until = self._blocked_until.get(user_id)
         if blocked_until is not None:
             if now < blocked_until:
@@ -76,6 +89,7 @@ class RateLimitMiddleware(BaseMiddleware):
             self._blocked_until.pop(user_id, None)
 
         self._cleanup(user_id, now)
+        self._maybe_global_cleanup(now)
         hits = self._hits[user_id]
 
         if len(hits) >= self.max_messages:

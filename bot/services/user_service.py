@@ -35,7 +35,7 @@ class UserService:
                 logger.debug("Updated user profile telegram_id=%s", tg_user.id)
             return user
 
-        is_admin = tg_user.id in self._settings.admin_ids
+        is_admin = tg_user.id in self._settings.admin_ids_set
         try:
             user = await self._repo.create(
                 telegram_id=tg_user.id,
@@ -50,7 +50,6 @@ class UserService:
             )
             return user
         except IntegrityError:
-            # Concurrent registration race: another request inserted the same telegram_id
             await self._repo._session.rollback()
             user = await self._repo.get_by_telegram_id(tg_user.id)
             if user is None:
@@ -65,7 +64,7 @@ class UserService:
             return user
 
     async def is_admin(self, telegram_id: int) -> bool:
-        if telegram_id in self._settings.admin_ids:
+        if telegram_id in self._settings.admin_ids_set:
             return True
         user = await self._repo.get_by_telegram_id(telegram_id)
         if user is None:
@@ -83,6 +82,5 @@ class UserService:
         return {"total_users": total}
 
     async def list_users(self, limit: int = 50) -> list[User]:
-        # Hard cap to prevent large data exposure even for admins
         safe_limit = max(1, min(limit, 50))
         return list(await self._repo.get_all(limit=safe_limit))

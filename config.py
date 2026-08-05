@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import List
+from typing import List, Set
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -44,6 +44,11 @@ class Settings(BaseSettings):
     @property
     def is_sqlite(self) -> bool:
         return self.database_url.startswith("sqlite")
+
+    @property
+    def admin_ids_set(self) -> Set[int]:
+        """O(1) membership checks for hot paths (filters, auth)."""
+        return set(self.admin_ids)
 
 
 @lru_cache
