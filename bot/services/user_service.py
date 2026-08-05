@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from aiogram.types import User as TgUser
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.database.models import User
@@ -24,23 +25,44 @@ class UserService:
                 or user.full_name != tg_user.full_name
             )
             if needs_update:
-                user = await self._repo.update(
+                updated = await self._repo.update(
                     tg_user.id,
                     username=tg_user.username,
                     full_name=tg_user.full_name,
                 )
+                if updated is not None:
+                    user = updated
                 logger.debug("Updated user profile telegram_id=%s", tg_user.id)
-            return user  # type: ignore[return-value]
+            return user
 
         is_admin = tg_user.id in self._settings.admin_ids
-        user = await self._repo.create(
-            telegram_id=tg_user.id,
-            username=tg_user.username,
-            full_name=tg_user.full_name,
-            is_admin=is_admin,
-        )
-        logger.info("Registered new user telegram_id=%s is_admin=%s", tg_user.id, is_admin)
-        return user
+        try:
+            user = await self._repo.create(
+                telegram_id=tg_user.id,
+                username=tg_user.username,
+                full_name=tg_user.full_name,
+                is_admin=is_admin,
+            )
+            logger.info(
+                "Registered new user telegram_id=%s is_admin=%s",
+                tg_user.id,
+                is_admin,
+            )
+            return user
+        except IntegrityError:
+            # Concurrent registration race: another request inserted the same telegram_id
+            await self._repo._session.rollback()
+            user = await self._repo.get_by_telegram_id(tg_user.id)
+            if user is None:
+                logger.error(
+                    "IntegrityError on create but user still missing telegram_id=%s",
+                    tg_user.id,
+                )
+                raise
+            logger.debug(
+                "Resolved concurrent create race telegram_id=%s", tg_user.id
+            )
+            return user
 
     async def is_admin(self, telegram_id: int) -> bool:
         if telegram_id in self._settings.admin_ids:

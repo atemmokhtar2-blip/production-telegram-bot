@@ -26,14 +26,27 @@ class AuthMiddleware(BaseMiddleware):
         if user is None:
             return await handler(event, data)
 
-        async with async_session_factory() as session:
-            service = UserService(session)
-            db_user = await service.get_or_create(user)
-            data["db_user"] = db_user
+        try:
+            async with async_session_factory() as session:
+                service = UserService(session)
+                db_user = await service.get_or_create(user)
+                data["db_user"] = db_user
 
-            if db_user.is_blocked:
-                logger.warning("Blocked user attempted access telegram_id=%s", user.id)
-                await event.answer("🚫 You are blocked from using this bot.")
-                return None
+                if db_user.is_blocked:
+                    logger.warning(
+                        "Blocked user attempted access telegram_id=%s", user.id
+                    )
+                    await event.answer("🚫 You are blocked from using this bot.")
+                    return None
+        except Exception as exc:
+            logger.exception(
+                "Auth middleware failed for telegram_id=%s: %s",
+                user.id,
+                type(exc).__name__,
+            )
+            await event.answer(
+                "⚠️ Temporary service error. Please try again in a moment."
+            )
+            return None
 
         return await handler(event, data)
