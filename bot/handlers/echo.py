@@ -19,16 +19,17 @@ MAX_ECHO_LENGTH = 1000
 @router.message(F.text == "👤 Profile")
 async def cmd_profile(message: Message, db_user: User) -> None:
     try:
+        username_display = f"@{db_user.username}" if db_user.username else "—"
         text = MESSAGES["profile"].format(
             telegram_id=db_user.telegram_id,
-            username=db_user.username or "—",
+            username=username_display,
             full_name=db_user.full_name or "—",
             is_admin="Yes" if db_user.is_admin else "No",
             created_at=db_user.created_at.strftime("%Y-%m-%d %H:%M UTC") if db_user.created_at else "—",
         )
         await message.answer(text, parse_mode="HTML")
     except Exception as exc:
-        logger.exception("Error in /profile handler: %s", exc)
+        logger.exception("Error in /profile handler: %s", type(exc).__name__)
         await message.answer("An unexpected error occurred. Please try again later.")
 
 
@@ -50,5 +51,5 @@ async def echo_handler(message: Message) -> None:
         text = MESSAGES["echo"].format(text=cleaned)
         await message.answer(text)
     except Exception as exc:
-        logger.exception("Error in echo handler: %s", exc)
+        logger.exception("Error in echo handler: %s", type(exc).__name__)
         await message.answer("An unexpected error occurred. Please try again later.")

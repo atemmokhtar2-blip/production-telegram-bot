@@ -18,7 +18,7 @@ MESSAGES = {
     "profile": (
         "👤 <b>Your profile</b>\n\n"
         "ID: <code>{telegram_id}</code>\n"
-        "Username: @{username}\n"
+        "Username: {username}\n"
         "Name: {full_name}\n"
         "Admin: {is_admin}\n"
         "Registered: {created_at}"
