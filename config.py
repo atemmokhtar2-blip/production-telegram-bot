@@ -22,6 +22,7 @@ class Settings(BaseSettings):
         description="SQLAlchemy async database URL",
     )
     log_level: str = Field(default="INFO", description="Logging level")
+    ai_model: str = Field(default="gpt-4o-mini", description="Default g4f model for AI agents")
 
     @field_validator("admin_ids", mode="before")
     @classmethod
