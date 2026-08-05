@@ -2,21 +2,19 @@ from __future__ import annotations
 
 from aiogram import F, Router
 from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 
 from bot.database.models import User
 from bot.localization import MESSAGES
+from bot.states import CreateBotStates
 from bot.utils.logger import get_logger
 
 logger = get_logger(__name__)
 router = Router(name="echo")
 
-MAX_ECHO_LENGTH = 1000
-
 
 @router.message(Command("profile"))
-@router.message(F.text == "👤 ملفي")
-@router.message(F.text == "👤 Profile")
 async def cmd_profile(message: Message, db_user: User) -> None:
     try:
         username_display = f"@{db_user.username}" if db_user.username else "—"
@@ -29,25 +27,24 @@ async def cmd_profile(message: Message, db_user: User) -> None:
         )
         await message.answer(text, parse_mode="HTML")
     except Exception as exc:
-        logger.exception("Error in /profile handler: %s", type(exc).__name__)
-        await message.answer(MESSAGES.get("error", "حدث خطأ غير متوقع."))
+        logger.exception("Error in /profile: %s", type(exc).__name__)
+        await message.answer(MESSAGES.get("error", "حدث خطأ."))
 
 
 @router.message(F.text & ~F.text.startswith("/"))
-async def echo_handler(message: Message) -> None:
-    try:
-        if not message.text:
-            return
+async def free_text_to_create(message: Message, state: FSMContext) -> None:
+    """Any plain text outside active trial/refine → start create flow with that text."""
+    current = await state.get_state()
+    if current is not None:
+        return  # other stateful handlers own this message
 
-        cleaned = message.text.strip()
-        if not cleaned:
-            return
+    text = (message.text or "").strip()
+    if not text:
+        return
 
-        if len(cleaned) > MAX_ECHO_LENGTH:
-            cleaned = cleaned[:MAX_ECHO_LENGTH] + "…"
+    # Hand off to create pipeline by setting state and re-using description processor
+    await state.set_state(CreateBotStates.waiting_description)
+    # Import here to avoid circular import at module load
+    from bot.handlers.create_bot import process_bot_description
 
-        text = MESSAGES["echo"].format(text=cleaned)
-        await message.answer(text)
-    except Exception as exc:
-        logger.exception("Error in echo handler: %s", type(exc).__name__)
-        await message.answer(MESSAGES.get("error", "حدث خطأ غير متوقع."))
+    await process_bot_description(message, state)

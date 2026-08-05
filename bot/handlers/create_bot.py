@@ -33,7 +33,6 @@ def _slug(text: str) -> str:
 
 @router.message(Command("create"))
 @router.message(Command("newbot"))
-@router.message(F.text.in_({"🤖 إنشاء بوت", "إنشاء بوت", "اعمل بوت", "صمم بوت"}))
 async def cmd_create_bot(message: Message, state: FSMContext) -> None:
     await state.set_state(CreateBotStates.waiting_description)
     await message.answer(
