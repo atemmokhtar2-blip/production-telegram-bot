@@ -12,7 +12,6 @@ from bot.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-# user_id -> (process, workdir)
 _RUNNING: dict[int, tuple[asyncio.subprocess.Process, Path]] = {}
 
 
@@ -30,10 +29,8 @@ async def validate_token(token: str) -> dict | None:
 
 
 async def start_trial(user_id: int, token: str, files: dict[str, str]) -> tuple[bool, str]:
-    """Write project to temp dir and run main.py with user's token."""
     await stop_trial(user_id)
 
-    # drop webhook so polling works
     try:
         async with aiohttp.ClientSession() as session:
             await session.get(
@@ -52,32 +49,28 @@ async def start_trial(user_id: int, token: str, files: dict[str, str]) -> tuple[
         fp = work / clean
         fp.parent.mkdir(parents=True, exist_ok=True)
         fp.write_text(content, encoding="utf-8")
+    (work / ".env").write_text(f"BOT_TOKEN={token}\n", encoding="utf-8")
 
-    env_path = work / ".env"
-    env_path.write_text(f"BOT_TOKEN={token}\n", encoding="utf-8")
-
-    # install deps in workdir venv would be slow — use system python + project reqs already installed
+    log_file = work / "trial.log"
+    log_fh = open(log_file, "w", encoding="utf-8")
     proc = await asyncio.create_subprocess_exec(
         "python3",
         "main.py",
         cwd=str(work),
-        stdout=asyncio.subprocess.PIPE,
+        stdout=log_fh,
         stderr=asyncio.subprocess.STDOUT,
         env={**os.environ, "BOT_TOKEN": token},
     )
     _RUNNING[user_id] = (proc, work)
 
-    # wait briefly for crash
-    try:
-        await asyncio.wait_for(proc.wait(), timeout=3.0)
-        out = b""
-        if proc.stdout:
-            out = await proc.stdout.read()
+    # Give it time to crash on bad token / import errors
+    await asyncio.sleep(4.0)
+    if proc.returncode is not None:
+        log_fh.close()
+        out = log_file.read_text(encoding="utf-8", errors="ignore")[-600:]
         _RUNNING.pop(user_id, None)
-        return False, (out.decode("utf-8", errors="ignore")[-500:] or "فشل تشغيل البوت")
-    except asyncio.TimeoutError:
-        # still running = good
-        return True, "ok"
+        return False, out or "فشل تشغيل البوت"
+    return True, "ok"
 
 
 async def stop_trial(user_id: int) -> None:
@@ -93,4 +86,4 @@ async def stop_trial(user_id: int) -> None:
             proc.kill()
     except Exception:
         pass
-    logger.info("Stopped trial for user %s work=%s", user_id, work)
+    logger.info("Stopped trial user=%s", user_id)
