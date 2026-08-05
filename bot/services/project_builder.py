@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import zipfile
 from io import BytesIO
@@ -17,6 +18,94 @@ def _slug(name: str) -> str:
 
 def _escape_html(text: str) -> str:
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+
+_STD_IMPORTS = """from __future__ import annotations
+
+import asyncio
+import logging
+
+from aiogram import Bot, Dispatcher, F, Router
+from aiogram.filters import Command, CommandStart
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.types import KeyboardButton, Message, ReplyKeyboardMarkup, ReplyKeyboardRemove
+
+from config import get_settings
+
+logging.basicConfig(level=logging.INFO)
+"""
+
+
+def _ensure_imports(code: str) -> str:
+    """Prepend required aiogram3 imports if the model omitted them."""
+    code = code.strip()
+    need = []
+    if "from aiogram import" not in code:
+        need.append(_STD_IMPORTS)
+    elif "from config import get_settings" not in code and "get_settings" in code:
+        code = "from config import get_settings\n" + code
+    if need:
+        # drop duplicate future imports inside body
+        body = code
+        for line in (
+            "from __future__ import annotations",
+            "import asyncio",
+            "import logging",
+            "from config import get_settings",
+        ):
+            body = body.replace(line + "\n", "")
+        code = need[0] + "\n" + body
+    if "async def main" not in code and "start_polling" in code:
+        # wrap if model only left polling at module level wrongly — skip, validate will catch
+        pass
+    if 'if __name__ == "__main__"' not in code and "async def main" in code:
+        code += '\n\nif __name__ == "__main__":\n    asyncio.run(main())\n'
+    return code
+
+
+def _strip_code(raw: str) -> str:
+    code = (raw or "").strip()
+    if "```" in code:
+        m = re.search(r"```(?:python)?\s*([\s\S]*?)```", code)
+        if m:
+            code = m.group(1).strip()
+    for marker in (
+        "from __future__",
+        "from aiogram",
+        "from config",
+        "import asyncio",
+        "import logging",
+    ):
+        i = code.find(marker)
+        if i > 0:
+            code = code[i:]
+            break
+    first = code.split("\n", 1)[0]
+    if first.startswith("import Bot") or first.startswith("import Dispatcher"):
+        rest = code.split("\n", 1)[1] if "\n" in code else ""
+        code = "from aiogram import Bot, Dispatcher, F, Router\n" + rest
+    return code.strip()
+
+
+def _extract_json(raw: str) -> dict | list | None:
+    text = (raw or "").strip()
+    if "```" in text:
+        m = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
+        if m:
+            text = m.group(1).strip()
+    try:
+        return json.loads(text)
+    except Exception:
+        m = re.search(r"[\{\[][\s\S]*[\}\]]", text)
+        if m:
+            try:
+                return json.loads(m.group(0))
+            except Exception:
+                return None
+    return None
 
 
 _CONFIG_PY = '''from __future__ import annotations
@@ -46,49 +135,37 @@ def get_settings() -> Settings:
 
 _REQ = "aiogram==3.13.1\npython-dotenv==1.0.1\npydantic==2.9.2\npydantic-settings==2.5.2\n"
 
-# Forbidden patterns = aiogram 2 / invalid
-_BAD_PATTERNS = (
+_BAD = (
     "aiogram.contrib",
     "aiogram.dispatcher",
-    "aiogram.utils.executor",
     "executor.start_polling",
     "Dispatcher(bot",
-    "from aiogram.dispatcher",
+    "keyboard.add(",
+    "ReplyKeyboardMarkup(resize_keyboard=True)",
 )
 
 
-def _strip_code_fences(raw: str) -> str:
-    code = (raw or "").strip()
-    if "```" in code:
-        m = re.search(r"```(?:python)?\s*([\s\S]*?)```", code)
-        if m:
-            code = m.group(1).strip()
-    # drop leading prose before first real import
-    for marker in ("from __future__", "from aiogram", "from config", "import asyncio", "import logging"):
-        i = code.find(marker)
-        if i > 0:
-            code = code[i:]
-            break
-        if i == 0:
-            break
-    # fix common broken first line: "import Bot, Dispatcher" -> from aiogram import ...
-    first = code.split("\n", 1)[0]
-    if first.startswith("import Bot") or first.startswith("import Dispatcher"):
-        rest = code.split("\n", 1)[1] if "\n" in code else ""
-        code = "from aiogram import Bot, Dispatcher, F, Router\n" + rest
-    return code.strip()
-
-
-def _is_aiogram3(code: str) -> bool:
-    if any(p in code for p in _BAD_PATTERNS):
-        return False
-    return "aiogram" in code and "Router" in code or (
-        "Dispatcher()" in code or "Dispatcher(storage" in code
-    )
+_AIOGRAM3_RULES = """
+STRICT aiogram 3.x only:
+- from aiogram import Bot, Dispatcher, F, Router
+- from aiogram.filters import Command, CommandStart
+- from aiogram.types import Message, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
+- from aiogram.fsm.context import FSMContext
+- from aiogram.fsm.state import State, StatesGroup
+- from aiogram.fsm.storage.memory import MemoryStorage
+- from config import get_settings
+- Keyboard: ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="...")]], resize_keyboard=True)
+- NEVER keyboard.add(), NEVER aiogram.contrib, NEVER Dispatcher(bot, ...)
+- bot = Bot(token=get_settings().bot_token)
+- dp = Dispatcher(storage=MemoryStorage()); dp.include_router(router)
+- async def main(): await dp.start_polling(bot, drop_pending_updates=True)
+- if __name__ == "__main__": import asyncio; asyncio.run(main())
+- Per-user data: dict keyed by user_id, never one global cart for all users
+"""
 
 
 class ProjectBuilder:
-    """Generate bot project purely from user description via AI (no templates)."""
+    """Multi-stage AI pipeline: spec → code → review → fix."""
 
     def __init__(self, ai: AIService | None = None) -> None:
         self._ai = ai or AIService()
@@ -99,83 +176,142 @@ class ProjectBuilder:
                 [
                     {
                         "role": "system",
-                        "content": (
-                            "لخّص بوت تيليجرام من وصف المستخدم فقط. "
-                            "نقاط عربية: الهدف، الأوامر، التدفقات. بدون كود وبدون HTML."
-                        ),
+                        "content": "لخّص البوت من الوصف: الهدف والأوامر والتدفقات. عربي مختصر بلا HTML.",
                     },
                     {"role": "user", "content": description[:2500]},
                 ],
-                temperature=0.35,
+                temperature=0.3,
             )
             return _escape_html((raw or description)[:2000])
-        except Exception as exc:
-            logger.warning("design_summary failed: %s", type(exc).__name__)
+        except Exception:
             return _escape_html(description[:500])
 
-    def _system_prompt(self) -> str:
-        return (
-            "You write COMPLETE production Telegram bots using ONLY aiogram 3.x.\n"
-            "CRITICAL — aiogram 3 API only:\n"
-            "- from aiogram import Bot, Dispatcher, F, Router\n"
-            "- from aiogram.filters import Command, CommandStart\n"
-            "- from aiogram.types import Message, KeyboardButton, ReplyKeyboardMarkup\n"
-            "- from aiogram.fsm.context import FSMContext\n"
-            "- from aiogram.fsm.state import State, StatesGroup\n"
-            "- from aiogram.fsm.storage.memory import MemoryStorage\n"
-            "- Router(), Dispatcher(storage=MemoryStorage()), dp.include_router(router)\n"
-            "- await dp.start_polling(bot, drop_pending_updates=True)\n"
-            "- NEVER use aiogram.contrib, dispatcher.FSMContext old path, or executor\n"
-            "- from config import get_settings ; token = get_settings().bot_token\n"
-            "Implement EXACTLY the user description (domain, flows, data). Arabic UI.\n"
-            "Output ONLY valid Python source for main.py — no markdown, no comments about the task."
-        )
-
-    async def generate_main_py(self, description: str) -> str:
-        raw = await self._ai.chat(
-            [
-                {"role": "system", "content": self._system_prompt()},
-                {
-                    "role": "user",
-                    "content": f"User description:\n{description[:3000]}\n\nWrite complete main.py now.",
-                },
-            ],
-            temperature=0.2,
-        )
-        return _strip_code_fences(raw or "")
-
-    async def _repair_main(self, description: str, broken: str, reason: str) -> str:
+    async def _build_spec(self, description: str) -> dict:
         raw = await self._ai.chat(
             [
                 {
                     "role": "system",
-                    "content": self._system_prompt()
-                    + "\nFix the broken file. Return ONLY corrected main.py source.",
+                    "content": (
+                        "You are a product analyst for Telegram bots. "
+                        "From the user description ONLY, return JSON object with keys: "
+                        "title (str), features (list of str), commands (list of {cmd, description}), "
+                        "flows (list of str step-by-step), entities (list of data objects needed), "
+                        "admin_features (list of str), sample_data (object with example items). "
+                        "Be concrete and complete. Arabic values ok. JSON only."
+                    ),
+                },
+                {"role": "user", "content": description[:3000]},
+            ],
+            temperature=0.25,
+        )
+        data = _extract_json(raw)
+        if not isinstance(data, dict):
+            data = {
+                "title": "بوت",
+                "features": [description[:200]],
+                "commands": [
+                    {"cmd": "start", "description": "بدء"},
+                    {"cmd": "help", "description": "مساعدة"},
+                ],
+                "flows": [description[:300]],
+                "entities": [],
+                "admin_features": [],
+                "sample_data": {},
+            }
+        return data
+
+    async def _codegen(self, description: str, spec: dict) -> str:
+        raw = await self._ai.chat(
+            [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a senior aiogram 3 engineer. Write ONE complete main.py "
+                        "that fully implements the SPEC. Every feature/command/flow must work. "
+                        "Include realistic sample_data from the spec. Arabic UI.\n"
+                        + _AIOGRAM3_RULES
+                        + "\nOutput ONLY Python source."
+                    ),
                 },
                 {
                     "role": "user",
                     "content": (
-                        f"Description:\n{description[:1500]}\n\n"
-                        f"Problem:\n{reason}\n\n"
-                        f"Broken code:\n{broken[:7000]}"
+                        f"Original description:\n{description[:2000]}\n\n"
+                        f"SPEC JSON:\n{json.dumps(spec, ensure_ascii=False)[:5000]}\n\n"
+                        "Write complete working main.py implementing ALL of the spec."
+                    ),
+                },
+            ],
+            temperature=0.15,
+        )
+        return _ensure_imports(_strip_code(raw or ""))
+
+    async def _review(self, description: str, spec: dict, code: str) -> list[str]:
+        raw = await self._ai.chat(
+            [
+                {
+                    "role": "system",
+                    "content": (
+                        "You review Telegram bot code against a SPEC. "
+                        "Return JSON array of missing or broken items (Arabic strings). "
+                        "If complete and valid aiogram3, return []. JSON only."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"Description:\n{description[:1200]}\n\n"
+                        f"SPEC:\n{json.dumps(spec, ensure_ascii=False)[:3000]}\n\n"
+                        f"CODE:\n{code[:8000]}"
                     ),
                 },
             ],
             temperature=0.1,
         )
-        return _strip_code_fences(raw or "")
+        data = _extract_json(raw)
+        if isinstance(data, list):
+            return [str(x) for x in data if x]
+        return []
+
+    async def _fix(self, description: str, spec: dict, code: str, issues: list[str]) -> str:
+        raw = await self._ai.chat(
+            [
+                {
+                    "role": "system",
+                    "content": (
+                        "Fix main.py so it fully satisfies the SPEC and issues list. "
+                        "Return complete corrected main.py only.\n" + _AIOGRAM3_RULES
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"Description:\n{description[:1500]}\n\n"
+                        f"SPEC:\n{json.dumps(spec, ensure_ascii=False)[:3000]}\n\n"
+                        f"Issues:\n{json.dumps(issues, ensure_ascii=False)}\n\n"
+                        f"Current code:\n{code[:8000]}"
+                    ),
+                },
+            ],
+            temperature=0.1,
+        )
+        return _ensure_imports(_strip_code(raw or code))
 
     def _validate(self, code: str) -> tuple[bool, str]:
-        if not code or len(code) < 80:
-            return False, "empty or too short"
-        if not _is_aiogram3(code):
-            return False, "not aiogram 3 (forbidden imports or missing Router/Dispatcher)"
-        if "from aiogram import" not in code and "import aiogram" not in code:
+        if not code or len(code) < 200:
+            return False, "too short"
+        if any(b in code for b in _BAD):
+            return False, "forbidden aiogram2 or invalid keyboard API"
+        if "from aiogram import" not in code:
             return False, "missing from aiogram import"
-        if "get_settings" not in code and "BOT_TOKEN" not in code:
-            # still ok if reads env — but we require config
-            if "config" not in code:
-                return False, "missing config/get_settings"
+        if "Router" not in code:
+            return False, "missing Router"
+        if "start_polling" not in code:
+            return False, "missing start_polling"
+        # must not be start/help only
+        handler_count = code.count("@router.message") + code.count("@dp.message")
+        if handler_count < 4:
+            return False, f"too few handlers ({handler_count})"
         try:
             compile(code, "main.py", "exec")
         except SyntaxError as e:
@@ -187,20 +323,38 @@ class ProjectBuilder:
     ) -> tuple[bytes, dict[str, str], str]:
         design = design_doc or await self.design_summary(description)
 
-        main_py = await self.generate_main_py(description)
+        # Stage 1: SPEC
+        logger.info("stage1 spec")
+        spec = await self._build_spec(description)
+        design = design or _escape_html(json.dumps(spec, ensure_ascii=False)[:1500])
+
+        # Stage 2: CODEGEN
+        logger.info("stage2 codegen")
+        main_py = await self._codegen(description, spec)
+
+        # Stage 3: validate + at most 2 repairs (avoid endless AI loops)
         ok, reason = self._validate(main_py)
         if not ok:
-            logger.warning("main.py invalid (%s) — repairing", reason)
-            main_py = await self._repair_main(description, main_py, reason)
+            logger.warning("validate fail: %s", reason)
+            main_py = await self._fix(description, spec, main_py, [reason])
             ok, reason = self._validate(main_py)
             if not ok:
-                # one more hard repair
-                main_py = await self._repair_main(
-                    description, main_py, reason + " | must be pure aiogram 3"
+                main_py = await self._fix(
+                    description, spec, main_py, [reason, "implement full SPEC"]
                 )
                 ok, reason = self._validate(main_py)
                 if not ok:
-                    raise RuntimeError(f"AI failed to produce valid main.py: {reason}")
+                    raise RuntimeError(f"Failed to generate usable bot: {reason}")
+        else:
+            try:
+                issues = await self._review(description, spec, main_py)
+                if issues:
+                    logger.warning("review issues: %s", issues[:5])
+                    fixed = await self._fix(description, spec, main_py, issues)
+                    if self._validate(fixed)[0]:
+                        main_py = fixed
+            except Exception as exc:
+                logger.warning("review skipped: %s", type(exc).__name__)
 
         if "from config import get_settings" not in main_py and "get_settings" in main_py:
             pass
@@ -214,12 +368,13 @@ class ProjectBuilder:
             ".env.example": "BOT_TOKEN=your_token_here\nADMIN_IDS=\n",
             ".gitignore": ".env\n.venv/\n__pycache__/\n*.pyc\n",
             "README.md": (
-                f"# بوت من وصف المستخدم\n\n## الوصف\n{description[:1000]}\n\n"
-                f"## ملخص\n{design[:1500]}\n\n"
+                f"# {spec.get('title', 'بوت')}\n\n## الوصف\n{description[:1000]}\n\n"
+                f"## الملخص\n{design[:1200]}\n\n"
                 "## تشغيل\n```bash\npip install -r requirements.txt\n"
                 "cp .env.example .env\npython main.py\n```\n"
             ),
             "DESIGN.md": design,
+            "SPEC.json": json.dumps(spec, ensure_ascii=False, indent=2),
         }
         return self._zip(files, project_name), files, design
 

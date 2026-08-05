@@ -65,7 +65,7 @@ async def process_bot_description(message: Message, state: FSMContext) -> None:
         text = text[:MAX_DESC_LEN]
 
     await state.clear()
-    status = await message.answer("⏳ جاري إنشاء بوت كامل قابل للتشغيل...")
+    status = await message.answer("⏳ جاري بناء البوت (مواصفات → كود → مراجعة)...\nقد يستغرق دقيقة.")
 
     uid = message.from_user.id if message.from_user else 0
     try:
