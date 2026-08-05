@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Sequence
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.database.models import User
@@ -94,8 +94,8 @@ class UserRepository:
 
     async def count(self) -> int:
         try:
-            result = await self._session.execute(select(User))
-            return len(result.scalars().all())
+            result = await self._session.execute(select(func.count()).select_from(User))
+            return int(result.scalar_one())
         except Exception as exc:
             logger.error("Failed to count users: %s", exc)
             raise

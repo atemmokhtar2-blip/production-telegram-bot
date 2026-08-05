@@ -19,15 +19,16 @@ class UserService:
     async def get_or_create(self, tg_user: TgUser) -> User:
         user = await self._repo.get_by_telegram_id(tg_user.id)
         if user is not None:
-            updated = False
-            if user.username != tg_user.username:
+            needs_update = (
+                user.username != tg_user.username
+                or user.full_name != tg_user.full_name
+            )
+            if needs_update:
                 user = await self._repo.update(
                     tg_user.id,
                     username=tg_user.username,
                     full_name=tg_user.full_name,
                 )
-                updated = True
-            if updated:
                 logger.debug("Updated user profile telegram_id=%s", tg_user.id)
             return user
 

@@ -15,7 +15,7 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    bot_token: str = Field(..., description="Telegram Bot API token")
+    bot_token: str = Field(default="", description="Telegram Bot API token")
     admin_ids: List[int] = Field(default_factory=list, description="List of admin Telegram user IDs")
     database_url: str = Field(
         default="sqlite+aiosqlite:///./data/bot.db",
